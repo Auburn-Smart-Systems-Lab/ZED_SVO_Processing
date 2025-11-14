@@ -23,7 +23,7 @@ class SVO2Processor:
             'QUALITY': sl.DEPTH_MODE.QUALITY,
             'PERFORMANCE': sl.DEPTH_MODE.PERFORMANCE,
         }
-        self.init_params.depth_mode = mode_map.get(mode_str, sl.DEPTH_MODE.NEURAL)
+        self.init_params.depth_mode = mode_map.get(mode_str, sl.DEPTH_MODE.ULTRA)
     
     def open(self):
         err = self.zed.open(self.init_params)
@@ -53,12 +53,14 @@ class SVO2Processor:
         if frame_end is None or frame_end > total_frames:
             frame_end = total_frames
         
+        # Calculate frames to process
+        frames_to_process = max(1, (frame_end - frame_start) // max(1, frame_step))
+        
         # Jump to start frame
         self.zed.set_svo_position(frame_start)
         
         imu_data_list = []
         extracted_frame_num = 0
-        frames_to_process = (frame_end - frame_start) // frame_step
         
         for frame_idx in range(frame_start, frame_end, frame_step):
             err = self.zed.grab(runtime_params)
@@ -71,15 +73,19 @@ class SVO2Processor:
             if options.get('rgb_left'):
                 self.zed.retrieve_image(image_left, sl.VIEW.LEFT)
                 img_left = image_left.get_data()
+                # Convert BGRA to RGB
+                img_left_rgb = cv2.cvtColor(img_left, cv2.COLOR_BGRA2RGB)
                 cv2.imwrite(str(self.output_dir / f'rgb_left_{extracted_frame_num:06d}.png'), 
-                           cv2.cvtColor(img_left, cv2.COLOR_RGBA2BGR))
+                           cv2.cvtColor(img_left_rgb, cv2.COLOR_RGB2BGR))
             
             # Extract RGB Right
             if options.get('rgb_right'):
                 self.zed.retrieve_image(image_right, sl.VIEW.RIGHT)
                 img_right = image_right.get_data()
+                # Convert BGRA to RGB
+                img_right_rgb = cv2.cvtColor(img_right, cv2.COLOR_BGRA2RGB)
                 cv2.imwrite(str(self.output_dir / f'rgb_right_{extracted_frame_num:06d}.png'),
-                           cv2.cvtColor(img_right, cv2.COLOR_RGBA2BGR))
+                           cv2.cvtColor(img_right_rgb, cv2.COLOR_RGB2BGR))
             
             # Extract Depth
             if options.get('depth'):
@@ -87,7 +93,7 @@ class SVO2Processor:
                 depth_data = depth_map.get_data()
                 np.save(str(self.output_dir / f'depth_{extracted_frame_num:06d}.npy'), depth_data)
                 
-                # Also save visualization
+                # Save visualization with better colormap
                 depth_viz = self.visualize_depth(depth_data)
                 cv2.imwrite(str(self.output_dir / f'depth_{extracted_frame_num:06d}_viz.png'), depth_viz)
             
@@ -124,9 +130,10 @@ class SVO2Processor:
             
             extracted_frame_num += 1
             
-            # Progress callback with current frame info
-            if progress_callback:
+            # Progress callback with current frame info - avoid division by zero
+            if progress_callback and frames_to_process > 0:
                 progress = (extracted_frame_num / frames_to_process) * 100
+                progress = min(progress, 100.0)  # Cap at 100%
                 progress_callback(progress, extracted_frame_num, frames_to_process)
         
         # Save IMU data if collected
@@ -137,26 +144,60 @@ class SVO2Processor:
     
     def visualize_depth(self, depth_data):
         """Create a colorized visualization of depth data"""
-        depth_normalized = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-        return cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+        # Create a copy and handle invalid values
+        depth_viz = depth_data.copy()
+        
+        # Replace NaN and inf with 0
+        depth_viz[np.isnan(depth_viz)] = 0
+        depth_viz[np.isinf(depth_viz)] = 0
+        
+        # Normalize to 0-255 range
+        max_val = depth_viz.max()
+        if max_val > 0:
+            depth_normalized = cv2.normalize(depth_viz, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        else:
+            depth_normalized = np.zeros_like(depth_viz, dtype=np.uint8)
+        
+        # Apply colormap - JET gives rainbow colors (blue=close, red=far)
+        depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+        
+        return depth_colored
     
     def save_point_cloud(self, pc_data, filepath):
-        """Save point cloud as PLY file"""
+        """Save point cloud as PLY file with correct RGB colors from ZED camera"""
+        # Extract XYZ coordinates (first 3 channels)
         points = pc_data[:, :, :3].reshape(-1, 3)
-        colors = pc_data[:, :, 3].reshape(-1, 1)
         
-        # Extract RGB from packed RGBA
-        colors_rgb = np.zeros((colors.shape[0], 3), dtype=np.uint8)
-        colors_rgb[:, 0] = (colors[:, 0].view(np.uint32) >> 16) & 0xFF
-        colors_rgb[:, 1] = (colors[:, 0].view(np.uint32) >> 8) & 0xFF
-        colors_rgb[:, 2] = colors[:, 0].view(np.uint32) & 0xFF
+        # Extract RGBA values (4th channel contains packed color)
+        rgba_packed = pc_data[:, :, 3].reshape(-1)
         
-        # Filter invalid points
+        # ZED SDK stores color as 32-bit unsigned int in ABGR format
+        # We need to unpack it correctly
+        rgba_as_uint32 = rgba_packed.view(np.uint32)
+        
+        # Unpack ABGR to RGB
+        # Format is: [A][B][G][R] in memory
+        r = ((rgba_as_uint32 >> 0) & 0xFF).astype(np.uint8)   # Red is in bits 0-7
+        g = ((rgba_as_uint32 >> 8) & 0xFF).astype(np.uint8)   # Green is in bits 8-15
+        b = ((rgba_as_uint32 >> 16) & 0xFF).astype(np.uint8)  # Blue is in bits 16-23
+        # a = ((rgba_as_uint32 >> 24) & 0xFF).astype(np.uint8)  # Alpha (we don't need this)
+        
+        # Stack into RGB array
+        colors_rgb = np.stack([r, g, b], axis=1)
+        
+        # Filter invalid points (NaN or Inf)
         valid_mask = ~np.isnan(points).any(axis=1) & ~np.isinf(points).any(axis=1)
-        points = points[valid_mask]
-        colors_rgb = colors_rgb[valid_mask]
         
-        # Write PLY
+        # Also filter points that are too far or at origin
+        distance_mask = np.linalg.norm(points, axis=1) > 0.01  # Ignore points closer than 1cm
+        
+        # Combine masks
+        final_mask = valid_mask & distance_mask
+        
+        points = points[final_mask]
+        colors_rgb = colors_rgb[final_mask]
+        
+        # Write PLY file
         with open(filepath, 'w') as f:
             f.write("ply\n")
             f.write("format ascii 1.0\n")

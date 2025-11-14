@@ -4,29 +4,203 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-md-10 mx-auto">
+    <div class="col-md-12">
         <h2 class="mb-4"><i class="bi bi-gear"></i> Configure Extraction Options</h2>
         
         <div class="card shadow-sm mb-4">
             <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="bi bi-files"></i> Uploaded Files</h5>
+                <h5 class="mb-0"><i class="bi bi-files"></i> Uploaded Files - Multi-Feed Preview</h5>
             </div>
             <div class="card-body">
-                <div class="list-group">
-                    {% for file in uploaded_files %}
-                    <div class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <i class="bi bi-file-earmark-video"></i>
-                                <strong>{{ file.filename }}</strong>
+                {% for file in uploaded_files %}
+                <div class="file-preview-container mb-5 p-3 border rounded" data-file-id="{{ file.id }}">
+                    <h5 class="mb-3"><i class="bi bi-file-earmark-video"></i> {{ file.filename }}</h5>
+                    
+                    <!-- Master Controls -->
+                    <div class="card mb-3">
+                        <div class="card-body bg-light">
+                            <div class="row align-items-center">
+                                <div class="col-md-3">
+                                    <label class="form-label mb-2"><strong>Depth Mode (Global):</strong></label>
+                                    <select class="form-select depth-mode-select" data-file-id="{{ file.id }}">
+                                        <option value="PERFORMANCE">Performance</option>
+                                        <option value="QUALITY">Quality</option>
+                                        <option value="ULTRA" selected>Ultra</option>
+                                        <option value="NEURAL">Neural</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <label class="form-label mb-2">
+                                        <strong>Frame:</strong> 
+                                        <span id="current-frame-{{ file.id }}">0</span> / 
+                                        <span id="total-frames-{{ file.id }}">0</span>
+                                    </label>
+                                    <input type="range" 
+                                           class="form-range frame-slider" 
+                                           id="slider-{{ file.id }}" 
+                                           min="0" 
+                                           max="100" 
+                                           value="0"
+                                           data-file-id="{{ file.id }}">
+                                </div>
+                                
+                                <div class="col-md-3">
+                                    <div class="btn-group w-100 mb-2" role="group">
+                                        <button class="btn btn-outline-primary play-btn" 
+                                                data-file-id="{{ file.id }}">
+                                            <i class="bi bi-play-fill"></i> Play
+                                        </button>
+                                        <button class="btn btn-outline-primary pause-btn" 
+                                                data-file-id="{{ file.id }}" 
+                                                style="display: none;">
+                                            <i class="bi bi-pause-fill"></i> Pause
+                                        </button>
+                                    </div>
+                                    <div class="btn-group w-100" role="group">
+                                        <button class="btn btn-sm btn-outline-secondary prev-frame-btn" 
+                                                data-file-id="{{ file.id }}">
+                                            <i class="bi bi-skip-backward-fill"></i>
+                                        </button>
+                                        <select class="form-select form-select-sm playback-speed-select" 
+                                                data-file-id="{{ file.id }}">
+                                            <option value="5">0.5x</option>
+                                            <option value="10">1x</option>
+                                            <option value="15" selected>1.5x</option>
+                                            <option value="20">2x</option>
+                                            <option value="30">3x</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-outline-secondary next-frame-btn" 
+                                                data-file-id="{{ file.id }}">
+                                            <i class="bi bi-skip-forward-fill"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-                            <span class="badge bg-secondary">
-                                {{ file.file_size|filesizeformat }}
-                            </span>
                         </div>
                     </div>
-                    {% endfor %}
+                    
+                    <!-- Multi-Feed Grid -->
+                    <div class="row g-3">
+                        <!-- RGB Left -->
+                        <div class="col-lg-6">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-secondary text-white py-2">
+                                    <small><strong><i class="bi bi-camera-video"></i> RGB Left Camera</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-rgb-left-{{ file.id }}" 
+                                     alt="RGB Left"
+                                     style="width: 100%; height: auto; min-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- RGB Right -->
+                        <div class="col-lg-6">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-secondary text-white py-2">
+                                    <small><strong><i class="bi bi-camera-video"></i> RGB Right Camera</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-rgb-right-{{ file.id }}" 
+                                     alt="RGB Right"
+                                     style="width: 100%; height: auto; min-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- Depth Map -->
+                        <div class="col-lg-4">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-info text-white py-2">
+                                    <small><strong><i class="bi bi-bar-chart"></i> Depth Map</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-depth-{{ file.id }}" 
+                                     alt="Depth"
+                                     style="width: 100%; height: auto; min-height: 150px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- Confidence Map -->
+                        <div class="col-lg-4">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-warning text-dark py-2">
+                                    <small><strong><i class="bi bi-clipboard-data"></i> Confidence Map</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-confidence-{{ file.id }}" 
+                                     alt="Confidence"
+                                     style="width: 100%; height: auto; min-height: 150px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- Normals Map -->
+                        <div class="col-lg-4">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-success text-white py-2">
+                                    <small><strong><i class="bi bi-bezier2"></i> Normals Map</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-normals-{{ file.id }}" 
+                                     alt="Normals"
+                                     style="width: 100%; height: auto; min-height: 150px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- Point Cloud View -->
+                        <div class="col-lg-6">
+                            <div class="card bg-dark h-100">
+                                <div class="card-header bg-primary text-white py-2">
+                                    <small><strong><i class="bi bi-grid-3x3"></i> Point Cloud View</strong></small>
+                                </div>
+                                <img src="" 
+                                     class="card-img-bottom feed-image" 
+                                     id="feed-pointcloud-{{ file.id }}" 
+                                     alt="Point Cloud"
+                                     style="width: 100%; height: auto; min-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        
+                        <!-- IMU Data -->
+                        <div class="col-lg-6">
+                            <div class="card h-100">
+                                <div class="card-header bg-danger text-white py-2">
+                                    <small><strong><i class="bi bi-compass"></i> IMU Data</strong></small>
+                                </div>
+                                <div class="card-body">
+                                    <div class="imu-data-display" id="imu-data-{{ file.id }}" style="font-size: 0.85rem;">
+                                        <div class="text-center text-muted py-3">
+                                            <small>Loading IMU data...</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- File Info -->
+                    <div class="card mt-3">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <strong>File Size:</strong> {{ file.file_size|filesizeformat }}
+                                </div>
+                                <div class="col-md-4">
+                                    <strong>Total Frames:</strong> <span id="info-frames-{{ file.id }}">Loading...</span>
+                                </div>
+                                <div class="col-md-4">
+                                    <strong>Uploaded:</strong> {{ file.uploaded_at|date:"Y-m-d H:i" }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                {% endfor %}
             </div>
         </div>
 
@@ -110,10 +284,10 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="{{ form.depth_mode.id_for_label }}" class="form-label">
-                                <strong>Depth Mode</strong>
+                                <strong>Depth Mode for Extraction</strong>
                             </label>
                             {{ form.depth_mode }}
-                            <div class="form-text">Choose depth computation quality</div>
+                            <div class="form-text">Choose depth computation quality for extraction</div>
                         </div>
                         
                         <div class="col-md-6 mb-3">
@@ -154,4 +328,200 @@
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Video player state for each file
+const videoPlayers = {};
+
+// Initialize video players for all files
+document.addEventListener('DOMContentLoaded', function() {
+    {% for file in uploaded_files %}
+    initializePlayer({{ file.id }});
+    {% endfor %}
+});
+
+function initializePlayer(fileId) {
+    videoPlayers[fileId] = {
+        currentFrame: 0,
+        totalFrames: 0,
+        isPlaying: false,
+        playInterval: null,
+        depthMode: 'ULTRA',
+        playbackSpeed: 15,
+        loadingFeeds: new Set()
+    };
+    
+    // Load file info
+    fetch(`/preview/${fileId}/info/`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                videoPlayers[fileId].totalFrames = data.total_frames;
+                document.getElementById(`total-frames-${fileId}`).textContent = data.total_frames;
+                document.getElementById(`info-frames-${fileId}`).textContent = data.total_frames;
+                document.getElementById(`slider-${fileId}`).max = data.total_frames - 1;
+                
+                // Load first frame for all feeds
+                loadAllFeeds(fileId, 0);
+            }
+        })
+        .catch(error => console.error('Error loading file info:', error));
+    
+    // Slider event
+    document.getElementById(`slider-${fileId}`).addEventListener('input', function(e) {
+        const frame = parseInt(e.target.value);
+        loadAllFeeds(fileId, frame);
+    });
+    
+    // Depth mode selector
+    document.querySelector(`.depth-mode-select[data-file-id="${fileId}"]`).addEventListener('change', function(e) {
+        videoPlayers[fileId].depthMode = e.target.value;
+        // Reload all feeds with new depth mode
+        loadAllFeeds(fileId, videoPlayers[fileId].currentFrame);
+    });
+    
+    // Playback speed selector
+    document.querySelector(`.playback-speed-select[data-file-id="${fileId}"]`).addEventListener('change', function(e) {
+        videoPlayers[fileId].playbackSpeed = parseInt(e.target.value);
+        
+        // If playing, restart with new speed
+        if (videoPlayers[fileId].isPlaying) {
+            pauseVideo(fileId);
+            playVideo(fileId);
+        }
+    });
+    
+    // Play button
+    document.querySelector(`.play-btn[data-file-id="${fileId}"]`).addEventListener('click', function() {
+        playVideo(fileId);
+    });
+    
+    // Pause button
+    document.querySelector(`.pause-btn[data-file-id="${fileId}"]`).addEventListener('click', function() {
+        pauseVideo(fileId);
+    });
+    
+    // Previous frame button
+    document.querySelector(`.prev-frame-btn[data-file-id="${fileId}"]`).addEventListener('click', function() {
+        const newFrame = Math.max(0, videoPlayers[fileId].currentFrame - 1);
+        loadAllFeeds(fileId, newFrame);
+    });
+    
+    // Next frame button
+    document.querySelector(`.next-frame-btn[data-file-id="${fileId}"]`).addEventListener('click', function() {
+        const newFrame = Math.min(videoPlayers[fileId].totalFrames - 1, videoPlayers[fileId].currentFrame + 1);
+        loadAllFeeds(fileId, newFrame);
+    });
+}
+
+function loadAllFeeds(fileId, frameNumber) {
+    const depthMode = videoPlayers[fileId].depthMode;
+    
+    // Update frame counter
+    videoPlayers[fileId].currentFrame = frameNumber;
+    document.getElementById(`current-frame-${fileId}`).textContent = frameNumber;
+    document.getElementById(`slider-${fileId}`).value = frameNumber;
+    
+    // Load all feed types
+    const feedTypes = ['rgb_left', 'rgb_right', 'depth_viz', 'confidence', 'normals', 'point_cloud'];
+    
+    feedTypes.forEach(feedType => {
+        loadFeed(fileId, frameNumber, feedType, depthMode);
+    });
+    
+    // Load IMU data
+    loadIMUData(fileId, frameNumber);
+}
+
+function loadFeed(fileId, frameNumber, viewType, depthMode) {
+    const feedId = `feed-${viewType.replace('_', '-')}-${fileId}`;
+    
+    fetch(`/preview/${fileId}/frame/?frame=${frameNumber}&view_type=${viewType}&depth_mode=${depthMode}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById(feedId).src = data.image;
+            }
+        })
+        .catch(error => console.error(`Error loading ${viewType}:`, error));
+}
+
+function loadIMUData(fileId, frameNumber) {
+    fetch(`/preview/${fileId}/imu/?frame=${frameNumber}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const imuData = data.imu_data;
+                const html = `
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <strong>Orientation (Quaternion):</strong>
+                            <div class="ms-2">
+                                <small>x: ${imuData.orientation.x.toFixed(4)}</small><br>
+                                <small>y: ${imuData.orientation.y.toFixed(4)}</small><br>
+                                <small>z: ${imuData.orientation.z.toFixed(4)}</small><br>
+                                <small>w: ${imuData.orientation.w.toFixed(4)}</small>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <strong>Angular Velocity (rad/s):</strong>
+                            <div class="ms-2">
+                                <small>x: ${imuData.angular_velocity.x.toFixed(4)}</small><br>
+                                <small>y: ${imuData.angular_velocity.y.toFixed(4)}</small><br>
+                                <small>z: ${imuData.angular_velocity.z.toFixed(4)}</small>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <strong>Linear Acceleration (m/s²):</strong>
+                            <div class="ms-2">
+                                <small>x: ${imuData.linear_acceleration.x.toFixed(4)}</small><br>
+                                <small>y: ${imuData.linear_acceleration.y.toFixed(4)}</small><br>
+                                <small>z: ${imuData.linear_acceleration.z.toFixed(4)}</small>
+                            </div>
+                        </div>
+                        <div class="col-12 mt-2">
+                            <small class="text-muted">Timestamp: ${imuData.timestamp} ms</small>
+                        </div>
+                    </div>
+                `;
+                document.getElementById(`imu-data-${fileId}`).innerHTML = html;
+            }
+        })
+        .catch(error => console.error('Error loading IMU data:', error));
+}
+
+function playVideo(fileId) {
+    if (videoPlayers[fileId].isPlaying) return;
+    
+    videoPlayers[fileId].isPlaying = true;
+    document.querySelector(`.play-btn[data-file-id="${fileId}"]`).style.display = 'none';
+    document.querySelector(`.pause-btn[data-file-id="${fileId}"]`).style.display = 'inline-block';
+    
+    const fps = videoPlayers[fileId].playbackSpeed;
+    
+    videoPlayers[fileId].playInterval = setInterval(() => {
+        const nextFrame = videoPlayers[fileId].currentFrame + 1;
+        
+        if (nextFrame >= videoPlayers[fileId].totalFrames) {
+            // Loop back to start
+            loadAllFeeds(fileId, 0);
+        } else {
+            loadAllFeeds(fileId, nextFrame);
+        }
+    }, 1000 / fps);
+}
+
+function pauseVideo(fileId) {
+    videoPlayers[fileId].isPlaying = false;
+    document.querySelector(`.play-btn[data-file-id="${fileId}"]`).style.display = 'inline-block';
+    document.querySelector(`.pause-btn[data-file-id="${fileId}"]`).style.display = 'none';
+    
+    if (videoPlayers[fileId].playInterval) {
+        clearInterval(videoPlayers[fileId].playInterval);
+        videoPlayers[fileId].playInterval = null;
+    }
+}
+</script>
 {% endblock %}

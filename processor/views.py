@@ -5,10 +5,12 @@ from django.views.decorators.http import require_http_methods
 from .models import SVO2Upload, ExtractionJob, ExtractionResult, FileProgress
 from .forms import ExtractionOptionsForm
 from .tasks import process_svo2_files_sync
+from .svo2_preview import SVO2Preview
 from django.conf import settings
 import os
 import shutil
 import threading
+import json
 
 def home(request):
     """Home page with upload form"""
@@ -87,6 +89,138 @@ def configure_extraction(request):
         'uploaded_files': uploaded_files
     })
 
+def preview_svo2_info(request, file_id):
+    """Get SVO2 file information (total frames, etc.)"""
+    svo_file = get_object_or_404(SVO2Upload, id=file_id)
+    
+    try:
+        preview = SVO2Preview(svo_file.file.path)
+        preview.open()
+        
+        total_frames = preview.get_total_frames()
+        
+        preview.close()
+        
+        return JsonResponse({
+            'success': True,
+            'filename': svo_file.filename,
+            'total_frames': total_frames
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        })
+
+def preview_svo2_frame(request, file_id):
+    """Get a specific frame from SVO2 file with different view types"""
+    svo_file = get_object_or_404(SVO2Upload, id=file_id)
+    frame_number = int(request.GET.get('frame', 0))
+    view_type = request.GET.get('view_type', 'rgb_left')
+    depth_mode = request.GET.get('depth_mode', 'ULTRA')
+    
+    try:
+        preview = SVO2Preview(svo_file.file.path)
+        preview.set_depth_mode(depth_mode)
+        preview.open()
+        
+        total_frames = preview.get_total_frames()
+        
+        # Ensure frame number is valid
+        if frame_number >= total_frames:
+            frame_number = total_frames - 1
+        if frame_number < 0:
+            frame_number = 0
+        
+        img_base64 = preview.get_frame(frame_number, view_type, depth_mode)
+        
+        preview.close()
+        
+        if img_base64:
+            return JsonResponse({
+                'success': True,
+                'image': f'data:image/jpeg;base64,{img_base64}',
+                'frame': frame_number,
+                'total_frames': total_frames,
+                'view_type': view_type,
+                'depth_mode': depth_mode
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': 'Failed to retrieve frame'
+            })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        })
+
+def preview_svo2_imu(request, file_id):
+    """Get IMU data for a specific frame"""
+    svo_file = get_object_or_404(SVO2Upload, id=file_id)
+    frame_number = int(request.GET.get('frame', 0))
+    
+    try:
+        preview = SVO2Preview(svo_file.file.path)
+        preview.open()
+        
+        total_frames = preview.get_total_frames()
+        
+        if frame_number >= total_frames:
+            frame_number = total_frames - 1
+        if frame_number < 0:
+            frame_number = 0
+        
+        imu_data = preview.get_imu_data(frame_number)
+        
+        preview.close()
+        
+        if imu_data:
+            return JsonResponse({
+                'success': True,
+                'imu_data': imu_data,
+                'frame': frame_number
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': 'Failed to retrieve IMU data'
+            })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        })
+
+def preview_svo2_thumbnail(request, file_id):
+    """Get thumbnail for SVO2 file"""
+    svo_file = get_object_or_404(SVO2Upload, id=file_id)
+    
+    try:
+        preview = SVO2Preview(svo_file.file.path)
+        preview.open()
+        
+        img_base64 = preview.get_thumbnail()
+        
+        preview.close()
+        
+        if img_base64:
+            return JsonResponse({
+                'success': True,
+                'image': f'data:image/jpeg;base64,{img_base64}'
+            })
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': 'Failed to generate thumbnail'
+            })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        })
+
 def job_status(request, job_id):
     """View job status and results"""
     job = get_object_or_404(ExtractionJob, id=job_id)
@@ -152,14 +286,12 @@ def delete_job(request, job_id):
         if job.output_path and os.path.exists(job.output_path):
             os.remove(job.output_path)
             deleted_files_count += 1
-            messages.success(request, f'Deleted output ZIP file')
         
         # 2. Delete the extraction results directory
         extraction_dir = os.path.join(settings.MEDIA_ROOT, 'extraction_results', f'job_{job_id}')
         if os.path.exists(extraction_dir):
             shutil.rmtree(extraction_dir)
             deleted_dirs_count += 1
-            messages.success(request, f'Deleted extraction results directory')
         
         # 3. Get all uploaded SVO2 files associated with this job
         svo2_files = job.svo2_files.all()
@@ -170,26 +302,24 @@ def delete_job(request, job_id):
                 os.remove(svo_file.file.path)
                 deleted_files_count += 1
         
-        # 5. Delete FileProgress records (will be auto-deleted by CASCADE, but just to be explicit)
+        # 5. Delete FileProgress records
         file_progress_count = job.file_progress.count()
         
-        # 6. Delete ExtractionResult records (will be auto-deleted by CASCADE)
+        # 6. Delete ExtractionResult records
         extraction_results_count = job.results.count()
         
         # 7. Delete the SVO2Upload records
         svo2_files_count = svo2_files.count()
         svo2_files.delete()
         
-        # 8. Finally, delete the job itself (this will cascade delete FileProgress and ExtractionResult)
+        # 8. Finally, delete the job itself
         job.delete()
         
-        # Success message with details
         messages.success(
             request, 
             f'Successfully deleted Job #{job_id}: '
             f'{deleted_files_count} files, {deleted_dirs_count} directories, '
-            f'{svo2_files_count} SVO2 records, {file_progress_count} progress records, '
-            f'and {extraction_results_count} result records'
+            f'{svo2_files_count} SVO2 records'
         )
         
     except Exception as e:
