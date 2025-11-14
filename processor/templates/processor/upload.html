@@ -1,0 +1,171 @@
+{% extends 'processor/base.html' %}
+
+{% block title %}Upload Files - SVO2 Processor{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <h2 class="mb-4"><i class="bi bi-upload"></i> Upload SVO2 Files</h2>
+        
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data" id="uploadForm">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label for="id_files" class="form-label">Select SVO2 Files</label>
+                        <input type="file" 
+                               class="form-control" 
+                               id="id_files" 
+                               name="files" 
+                               multiple 
+                               accept=".svo2"
+                               required>
+                        <div class="form-text">
+                            You can select multiple .svo2 files at once
+                        </div>
+                    </div>
+
+                    <div id="fileList" class="mb-3"></div>
+
+                    <!-- Upload Progress -->
+                    <div id="uploadProgressContainer" style="display: none;" class="mb-3">
+                        <label class="form-label"><strong>Uploading Files...</strong></label>
+                        <div class="progress" style="height: 30px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+                                 role="progressbar" 
+                                 id="uploadProgressBar"
+                                 style="width: 0%"
+                                 aria-valuenow="0" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                                <span id="uploadProgressText" class="fw-bold">0%</span>
+                            </div>
+                        </div>
+                        <small class="text-muted" id="uploadStatus">Preparing upload...</small>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary" id="submitBtn">
+                            <i class="bi bi-arrow-right-circle"></i> Continue to Configuration
+                        </button>
+                        <a href="{% url 'home' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Back
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// File list preview
+document.getElementById('id_files').addEventListener('change', function(e) {
+    const fileList = document.getElementById('fileList');
+    fileList.innerHTML = '';
+    
+    if (this.files.length > 0) {
+        const listGroup = document.createElement('div');
+        listGroup.className = 'list-group';
+        
+        let totalSize = 0;
+        Array.from(this.files).forEach(file => {
+            totalSize += file.size;
+            const item = document.createElement('div');
+            item.className = 'list-group-item';
+            item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="bi bi-file-earmark-video"></i>
+                        <strong>${file.name}</strong>
+                    </div>
+                    <span class="badge bg-primary rounded-pill">
+                        ${(file.size / (1024 * 1024)).toFixed(2)} MB
+                    </span>
+                </div>
+            `;
+            listGroup.appendChild(item);
+        });
+        
+        // Add total size
+        const totalItem = document.createElement('div');
+        totalItem.className = 'list-group-item list-group-item-info';
+        totalItem.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <strong>Total Size:</strong>
+                <span class="badge bg-info rounded-pill">
+                    ${(totalSize / (1024 * 1024)).toFixed(2)} MB
+                </span>
+            </div>
+        `;
+        listGroup.appendChild(totalItem);
+        
+        fileList.appendChild(listGroup);
+    }
+});
+
+// Upload with progress
+document.getElementById('uploadForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const progressContainer = document.getElementById('uploadProgressContainer');
+    const progressBar = document.getElementById('uploadProgressBar');
+    const progressText = document.getElementById('uploadProgressText');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Show progress bar
+    progressContainer.style.display = 'block';
+    submitBtn.disabled = true;
+    
+    const xhr = new XMLHttpRequest();
+    
+    // Track upload progress
+    xhr.upload.addEventListener('progress', function(e) {
+        if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            progressBar.style.width = percentComplete + '%';
+            progressBar.setAttribute('aria-valuenow', percentComplete);
+            progressText.textContent = percentComplete.toFixed(1) + '%';
+            
+            const uploadedMB = (e.loaded / (1024 * 1024)).toFixed(2);
+            const totalMB = (e.total / (1024 * 1024)).toFixed(2);
+            uploadStatus.textContent = `Uploaded ${uploadedMB} MB of ${totalMB} MB`;
+        }
+    });
+    
+    xhr.addEventListener('load', function() {
+        if (xhr.status === 200 || xhr.status === 302) {
+            progressBar.classList.remove('bg-primary');
+            progressBar.classList.add('bg-success');
+            progressText.textContent = '100%';
+            uploadStatus.textContent = 'Upload complete! Redirecting...';
+            
+            // Redirect after success
+            setTimeout(() => {
+                window.location.href = xhr.responseURL || "{% url 'configure_extraction' %}";
+            }, 500);
+        } else {
+            progressBar.classList.remove('bg-primary');
+            progressBar.classList.add('bg-danger');
+            uploadStatus.textContent = 'Upload failed. Please try again.';
+            submitBtn.disabled = false;
+        }
+    });
+    
+    xhr.addEventListener('error', function() {
+        progressBar.classList.remove('bg-primary');
+        progressBar.classList.add('bg-danger');
+        uploadStatus.textContent = 'Upload failed. Please try again.';
+        submitBtn.disabled = false;
+    });
+    
+    xhr.open('POST', this.action);
+    xhr.send(formData);
+});
+</script>
+{% endblock %}

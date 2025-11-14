@@ -1,0 +1,7 @@
+.vscode
+env
+*.sqlite3
+*.ipynb
+media
+__pycache__
+migrations
