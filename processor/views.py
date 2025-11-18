@@ -61,6 +61,30 @@ def configure_extraction(request):
     
     uploaded_files = SVO2Upload.objects.filter(id__in=uploaded_ids)
     
+    # Check if we're reconfiguring an existing job
+    rerun_job_id = request.GET.get('rerun_job')
+    initial_data = {}
+    
+    if rerun_job_id:
+        try:
+            rerun_job = ExtractionJob.objects.get(id=rerun_job_id)
+            initial_data = {
+                'extract_rgb_left': rerun_job.extract_rgb_left,
+                'extract_rgb_right': rerun_job.extract_rgb_right,
+                'extract_depth': rerun_job.extract_depth,
+                'extract_point_cloud': rerun_job.extract_point_cloud,
+                'extract_confidence': rerun_job.extract_confidence,
+                'extract_normals': rerun_job.extract_normals,
+                'extract_imu': rerun_job.extract_imu,
+                'depth_mode': rerun_job.depth_mode,
+                'frame_start': rerun_job.frame_start,
+                'frame_end': rerun_job.frame_end,
+                'frame_step': rerun_job.frame_step,
+            }
+            messages.info(request, f'Reconfiguring settings from Job #{rerun_job_id}')
+        except ExtractionJob.DoesNotExist:
+            pass
+    
     if request.method == 'POST':
         form = ExtractionOptionsForm(request.POST)
         if form.is_valid():
@@ -82,12 +106,30 @@ def configure_extraction(request):
             messages.success(request, f'Extraction job #{job.id} started')
             return redirect('job_status', job_id=job.id)
     else:
-        form = ExtractionOptionsForm()
+        form = ExtractionOptionsForm(initial=initial_data)
     
     return render(request, 'processor/configure.html', {
         'form': form,
         'uploaded_files': uploaded_files
     })
+
+def rerun_job(request, job_id):
+    """Rerun an existing job with potentially different settings"""
+    job = get_object_or_404(ExtractionJob, id=job_id)
+    
+    # Get the files from the existing job
+    svo2_files = job.svo2_files.all()
+    
+    if not svo2_files.exists():
+        messages.error(request, 'No files found for this job')
+        return redirect('job_list')
+    
+    # Store file IDs in session
+    request.session['uploaded_ids'] = list(svo2_files.values_list('id', flat=True))
+    
+    # Redirect to configure with rerun parameter
+    messages.info(request, f'Rerunning Job #{job_id} - Modify settings as needed')
+    return redirect(f'/configure/?rerun_job={job_id}')
 
 def preview_svo2_info(request, file_id):
     """Get SVO2 file information (total frames, etc.)"""
@@ -326,3 +368,103 @@ def delete_job(request, job_id):
         messages.error(request, f'Error deleting job: {str(e)}')
     
     return redirect('job_list')
+
+# Add these imports at the top
+from .models import ExtractedFile
+import mimetypes
+
+# Add these new views at the end of the file
+
+def browse_files(request, job_id):
+    """Browse extracted files for a job"""
+    job = get_object_or_404(ExtractionJob, id=job_id)
+    
+    if job.status != 'completed':
+        messages.warning(request, 'Job not completed yet')
+        return redirect('job_status', job_id=job_id)
+    
+    # Debug: Check if files exist
+    total_files = ExtractedFile.objects.filter(job=job).count()
+    print(f"Total extracted files for job {job_id}: {total_files}")
+    
+    # Get all extracted files grouped by category
+    categories = {}
+    for category_value, category_label in ExtractedFile.CATEGORY_CHOICES:
+        files = ExtractedFile.objects.filter(job=job, category=category_value).order_by('frame_number', 'filename')
+        print(f"Category {category_value}: {files.count()} files")
+        if files.exists():
+            categories[category_value] = {
+                'label': category_label,
+                'files': files,
+                'count': files.count()
+            }
+    
+    print(f"Categories with files: {list(categories.keys())}")
+    
+    return render(request, 'processor/browse_files.html', {
+        'job': job,
+        'categories': categories
+    })
+
+def view_file(request, file_id):
+    """View individual extracted file"""
+    extracted_file = get_object_or_404(ExtractedFile, id=file_id)
+    
+    # Determine viewer type based on file type
+    viewer_template = None
+    file_data = None
+    
+    if extracted_file.file_type == 'image':
+        viewer_template = 'processor/viewers/image_viewer.html'
+    elif extracted_file.file_type == 'point_cloud':
+        viewer_template = 'processor/viewers/pointcloud_viewer.html'
+    elif extracted_file.file_type == 'csv':
+        viewer_template = 'processor/viewers/csv_viewer.html'
+        # Read CSV data
+        import csv
+        with open(extracted_file.file_path, 'r') as f:
+            reader = csv.DictReader(f)
+            file_data = list(reader)
+    elif extracted_file.file_type == 'depth':
+        viewer_template = 'processor/viewers/depth_viewer.html'
+    
+    return render(request, viewer_template, {
+        'file': extracted_file,
+        'file_data': file_data
+    })
+
+def serve_extracted_file(request, file_id):
+    """Serve extracted file for viewing/downloading"""
+    extracted_file = get_object_or_404(ExtractedFile, id=file_id)
+    
+    if not os.path.exists(extracted_file.file_path):
+        return HttpResponse('File not found', status=404)
+    
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(extracted_file.filename)
+    if content_type is None:
+        content_type = 'application/octet-stream'
+    
+    response = FileResponse(open(extracted_file.file_path, 'rb'), content_type=content_type)
+    
+    # For images, display inline; for others, download
+    if extracted_file.file_type == 'image':
+        response['Content-Disposition'] = f'inline; filename="{extracted_file.filename}"'
+    else:
+        response['Content-Disposition'] = f'attachment; filename="{extracted_file.filename}"'
+    
+    return response
+
+def gallery_view(request, job_id, category):
+    """Gallery view for a specific category"""
+    job = get_object_or_404(ExtractionJob, id=job_id)
+    files = ExtractedFile.objects.filter(job=job, category=category).order_by('frame_number', 'filename')
+    
+    category_label = dict(ExtractedFile.CATEGORY_CHOICES).get(category, category)
+    
+    return render(request, 'processor/gallery.html', {
+        'job': job,
+        'category': category,
+        'category_label': category_label,
+        'files': files
+    })

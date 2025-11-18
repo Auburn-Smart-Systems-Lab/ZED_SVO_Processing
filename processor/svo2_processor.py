@@ -2,206 +2,301 @@ import pyzed.sl as sl
 import cv2
 import numpy as np
 import os
-from pathlib import Path
+import csv
+from datetime import datetime
 
 class SVO2Processor:
-    def __init__(self, svo_path, output_dir):
+    def __init__(self, svo_path, output_dir, options):
         self.svo_path = svo_path
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = output_dir
+        self.options = options
+        self.camera = sl.Camera()
+        self.extracted_files = []  # Track all extracted files
         
-        self.zed = sl.Camera()
-        self.init_params = sl.InitParameters()
-        self.init_params.set_from_svo_file(str(svo_path))
-        self.init_params.svo_real_time_mode = False
+        # Create category subfolders
+        self.folders = {}
+        if options['extract_rgb_left']:
+            self.folders['rgb_left'] = os.path.join(output_dir, '1_RGB_Left')
+            os.makedirs(self.folders['rgb_left'], exist_ok=True)
+        if options['extract_rgb_right']:
+            self.folders['rgb_right'] = os.path.join(output_dir, '2_RGB_Right')
+            os.makedirs(self.folders['rgb_right'], exist_ok=True)
+        if options['extract_depth']:
+            self.folders['depth'] = os.path.join(output_dir, '3_Depth')
+            os.makedirs(self.folders['depth'], exist_ok=True)
+        if options['extract_point_cloud']:
+            self.folders['point_cloud'] = os.path.join(output_dir, '4_PointCloud')
+            os.makedirs(self.folders['point_cloud'], exist_ok=True)
+        if options['extract_confidence']:
+            self.folders['confidence'] = os.path.join(output_dir, '5_Confidence')
+            os.makedirs(self.folders['confidence'], exist_ok=True)
+        if options['extract_normals']:
+            self.folders['normals'] = os.path.join(output_dir, '6_Normals')
+            os.makedirs(self.folders['normals'], exist_ok=True)
+        if options['extract_imu']:
+            self.folders['imu'] = os.path.join(output_dir, '7_IMU')
+            os.makedirs(self.folders['imu'], exist_ok=True)
         
-    def set_depth_mode(self, mode_str):
-        """Set depth mode: NEURAL, ULTRA, QUALITY, PERFORMANCE"""
-        mode_map = {
-            'NEURAL': sl.DEPTH_MODE.NEURAL,
-            'ULTRA': sl.DEPTH_MODE.ULTRA,
-            'QUALITY': sl.DEPTH_MODE.QUALITY,
-            'PERFORMANCE': sl.DEPTH_MODE.PERFORMANCE,
-        }
-        self.init_params.depth_mode = mode_map.get(mode_str, sl.DEPTH_MODE.ULTRA)
-    
     def open(self):
-        err = self.zed.open(self.init_params)
-        if err != sl.ERROR_CODE.SUCCESS:
-            raise Exception(f"Failed to open SVO file: {err}")
-        return self.zed.get_camera_information().camera_configuration.fps
+        """Open the SVO file"""
+        init_params = sl.InitParameters()
+        init_params.set_from_svo_file(self.svo_path)
+        init_params.svo_real_time_mode = False
+        
+        # Set depth mode
+        depth_mode_map = {
+            'PERFORMANCE': sl.DEPTH_MODE.PERFORMANCE,
+            'QUALITY': sl.DEPTH_MODE.QUALITY,
+            'ULTRA': sl.DEPTH_MODE.ULTRA,
+            'NEURAL': sl.DEPTH_MODE.NEURAL
+        }
+        init_params.depth_mode = depth_mode_map.get(
+            self.options.get('depth_mode', 'ULTRA'),
+            sl.DEPTH_MODE.ULTRA
+        )
+        
+        init_params.coordinate_units = sl.UNIT.METER
+        
+        status = self.camera.open(init_params)
+        if status != sl.ERROR_CODE.SUCCESS:
+            raise Exception(f"Failed to open SVO file: {status}")
+        
+        return True
     
     def get_total_frames(self):
         """Get total number of frames in the SVO file"""
-        return self.zed.get_svo_number_of_frames()
+        return self.camera.get_svo_number_of_frames()
     
-    def extract_frames(self, options, frame_start=0, frame_end=None, frame_step=1, progress_callback=None):
-        """
-        Extract data based on options dict with progress callbacks
-        """
-        runtime_params = sl.RuntimeParameters()
+    def process(self, progress_callback=None):
+        """Process the SVO file and extract data"""
+        total_frames = self.get_total_frames()
+        frame_start = self.options.get('frame_start', 0)
+        frame_end = self.options.get('frame_end', total_frames)
+        frame_step = self.options.get('frame_step', 1)
         
-        # Prepare image containers
-        image_left = sl.Mat()
-        image_right = sl.Mat()
+        if frame_end is None or frame_end > total_frames:
+            frame_end = total_frames
+        
+        # Set starting position
+        self.camera.set_svo_position(frame_start)
+        
+        # Prepare data containers
+        rgb_left = sl.Mat()
+        rgb_right = sl.Mat()
         depth_map = sl.Mat()
         point_cloud = sl.Mat()
         confidence_map = sl.Mat()
         normals_map = sl.Mat()
         
-        total_frames = self.zed.get_svo_number_of_frames()
-        if frame_end is None or frame_end > total_frames:
-            frame_end = total_frames
-        
-        # Calculate frames to process
-        frames_to_process = max(1, (frame_end - frame_start) // max(1, frame_step))
-        
-        # Jump to start frame
-        self.zed.set_svo_position(frame_start)
-        
+        # IMU data storage
         imu_data_list = []
-        extracted_frame_num = 0
         
-        for frame_idx in range(frame_start, frame_end, frame_step):
-            err = self.zed.grab(runtime_params)
-            if err != sl.ERROR_CODE.SUCCESS:
-                break
-            
-            current_frame = self.zed.get_svo_position()
-            
-            # Extract RGB Left
-            if options.get('rgb_left'):
-                self.zed.retrieve_image(image_left, sl.VIEW.LEFT)
-                img_left = image_left.get_data()
-                # Convert BGRA to RGB
-                img_left_rgb = cv2.cvtColor(img_left, cv2.COLOR_BGRA2RGB)
-                cv2.imwrite(str(self.output_dir / f'rgb_left_{extracted_frame_num:06d}.png'), 
-                           cv2.cvtColor(img_left_rgb, cv2.COLOR_RGB2BGR))
-            
-            # Extract RGB Right
-            if options.get('rgb_right'):
-                self.zed.retrieve_image(image_right, sl.VIEW.RIGHT)
-                img_right = image_right.get_data()
-                # Convert BGRA to RGB
-                img_right_rgb = cv2.cvtColor(img_right, cv2.COLOR_BGRA2RGB)
-                cv2.imwrite(str(self.output_dir / f'rgb_right_{extracted_frame_num:06d}.png'),
-                           cv2.cvtColor(img_right_rgb, cv2.COLOR_RGB2BGR))
-            
-            # Extract Depth
-            if options.get('depth'):
-                self.zed.retrieve_measure(depth_map, sl.MEASURE.DEPTH)
-                depth_data = depth_map.get_data()
-                np.save(str(self.output_dir / f'depth_{extracted_frame_num:06d}.npy'), depth_data)
+        runtime_params = sl.RuntimeParameters()
+        
+        current_frame = frame_start
+        processed_count = 0
+        
+        while current_frame < frame_end:
+            # Grab frame
+            if self.camera.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+                # Check if we should process this frame
+                if (current_frame - frame_start) % frame_step == 0:
+                    frame_index = processed_count
+                    
+                    # Extract RGB Left
+                    if self.options['extract_rgb_left']:
+                        self.camera.retrieve_image(rgb_left, sl.VIEW.LEFT)
+                        img_path = os.path.join(self.folders['rgb_left'], f'frame_{frame_index:06d}.jpg')
+                        cv2.imwrite(img_path, rgb_left.get_data())
+                        self.extracted_files.append({
+                            'category': 'rgb_left',
+                            'file_type': 'image',
+                            'file_path': img_path,
+                            'filename': f'frame_{frame_index:06d}.jpg',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(img_path)
+                        })
+                    
+                    # Extract RGB Right
+                    if self.options['extract_rgb_right']:
+                        self.camera.retrieve_image(rgb_right, sl.VIEW.RIGHT)
+                        img_path = os.path.join(self.folders['rgb_right'], f'frame_{frame_index:06d}.jpg')
+                        cv2.imwrite(img_path, rgb_right.get_data())
+                        self.extracted_files.append({
+                            'category': 'rgb_right',
+                            'file_type': 'image',
+                            'file_path': img_path,
+                            'filename': f'frame_{frame_index:06d}.jpg',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(img_path)
+                        })
+                    
+                    # Extract Depth
+                    if self.options['extract_depth']:
+                        self.camera.retrieve_measure(depth_map, sl.MEASURE.DEPTH)
+                        depth_data = depth_map.get_data()
+                        
+                        # Save raw depth as numpy
+                        depth_path = os.path.join(self.folders['depth'], f'frame_{frame_index:06d}.npy')
+                        np.save(depth_path, depth_data)
+                        
+                        # Save colorized depth as image
+                        depth_viz = self._colorize_depth(depth_data)
+                        depth_img_path = os.path.join(self.folders['depth'], f'frame_{frame_index:06d}.jpg')
+                        cv2.imwrite(depth_img_path, depth_viz)
+                        
+                        self.extracted_files.append({
+                            'category': 'depth',
+                            'file_type': 'depth',
+                            'file_path': depth_path,
+                            'filename': f'frame_{frame_index:06d}.npy',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(depth_path)
+                        })
+                        self.extracted_files.append({
+                            'category': 'depth',
+                            'file_type': 'image',
+                            'file_path': depth_img_path,
+                            'filename': f'frame_{frame_index:06d}.jpg',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(depth_img_path)
+                        })
+                    
+                    # Extract Point Cloud
+                    if self.options['extract_point_cloud']:
+                        self.camera.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA)
+                        pc_data = point_cloud.get_data()
+                        
+                        # Save as PLY
+                        ply_path = os.path.join(self.folders['point_cloud'], f'frame_{frame_index:06d}.ply')
+                        self._save_point_cloud_ply(pc_data, ply_path)
+                        
+                        self.extracted_files.append({
+                            'category': 'point_cloud',
+                            'file_type': 'point_cloud',
+                            'file_path': ply_path,
+                            'filename': f'frame_{frame_index:06d}.ply',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(ply_path)
+                        })
+                    
+                    # Extract Confidence
+                    if self.options['extract_confidence']:
+                        self.camera.retrieve_measure(confidence_map, sl.MEASURE.CONFIDENCE)
+                        conf_data = confidence_map.get_data()
+                        conf_img = (conf_data * 255).astype(np.uint8)
+                        conf_path = os.path.join(self.folders['confidence'], f'frame_{frame_index:06d}.jpg')
+                        cv2.imwrite(conf_path, conf_img)
+                        
+                        self.extracted_files.append({
+                            'category': 'confidence',
+                            'file_type': 'image',
+                            'file_path': conf_path,
+                            'filename': f'frame_{frame_index:06d}.jpg',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(conf_path)
+                        })
+                    
+                    # Extract Normals
+                    if self.options['extract_normals']:
+                        self.camera.retrieve_measure(normals_map, sl.MEASURE.NORMALS)
+                        normals_data = normals_map.get_data()
+                        normals_vis = self._visualize_normals(normals_data)
+                        normals_path = os.path.join(self.folders['normals'], f'frame_{frame_index:06d}.jpg')
+                        cv2.imwrite(normals_path, normals_vis)
+                        
+                        self.extracted_files.append({
+                            'category': 'normals',
+                            'file_type': 'image',
+                            'file_path': normals_path,
+                            'filename': f'frame_{frame_index:06d}.jpg',
+                            'frame_number': frame_index,
+                            'file_size': os.path.getsize(normals_path)
+                        })
+                    
+                    # Extract IMU data
+                    if self.options['extract_imu']:
+                        imu_data = sl.SensorsData()
+                        if self.camera.get_sensors_data(imu_data, sl.TIME_REFERENCE.IMAGE) == sl.ERROR_CODE.SUCCESS:
+                            imu_dict = {
+                                'frame': frame_index,
+                                'timestamp': imu_data.get_imu_data().timestamp.get_milliseconds(),
+                                'orientation_x': imu_data.get_imu_data().get_pose().get_orientation().get()[0],
+                                'orientation_y': imu_data.get_imu_data().get_pose().get_orientation().get()[1],
+                                'orientation_z': imu_data.get_imu_data().get_pose().get_orientation().get()[2],
+                                'orientation_w': imu_data.get_imu_data().get_pose().get_orientation().get()[3],
+                                'angular_velocity_x': imu_data.get_imu_data().get_angular_velocity()[0],
+                                'angular_velocity_y': imu_data.get_imu_data().get_angular_velocity()[1],
+                                'angular_velocity_z': imu_data.get_imu_data().get_angular_velocity()[2],
+                                'linear_acceleration_x': imu_data.get_imu_data().get_linear_acceleration()[0],
+                                'linear_acceleration_y': imu_data.get_imu_data().get_linear_acceleration()[1],
+                                'linear_acceleration_z': imu_data.get_imu_data().get_linear_acceleration()[2],
+                            }
+                            imu_data_list.append(imu_dict)
+                    
+                    processed_count += 1
+                    
+                    # Progress callback
+                    if progress_callback:
+                        progress = (current_frame - frame_start) / (frame_end - frame_start) * 100
+                        progress_callback(progress, current_frame, total_frames)
                 
-                # Save visualization with better colormap
-                depth_viz = self.visualize_depth(depth_data)
-                cv2.imwrite(str(self.output_dir / f'depth_{extracted_frame_num:06d}_viz.png'), depth_viz)
-            
-            # Extract Point Cloud
-            if options.get('point_cloud'):
-                self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA)
-                pc_data = point_cloud.get_data()
-                self.save_point_cloud(pc_data, self.output_dir / f'pointcloud_{extracted_frame_num:06d}.ply')
-            
-            # Extract Confidence
-            if options.get('confidence'):
-                self.zed.retrieve_measure(confidence_map, sl.MEASURE.CONFIDENCE)
-                conf_data = confidence_map.get_data()
-                np.save(str(self.output_dir / f'confidence_{extracted_frame_num:06d}.npy'), conf_data)
-            
-            # Extract Normals
-            if options.get('normals'):
-                self.zed.retrieve_measure(normals_map, sl.MEASURE.NORMALS)
-                normals_data = normals_map.get_data()
-                np.save(str(self.output_dir / f'normals_{extracted_frame_num:06d}.npy'), normals_data)
-            
-            # Extract IMU
-            if options.get('imu'):
-                sensors_data = sl.SensorsData()
-                self.zed.get_sensors_data(sensors_data, sl.TIME_REFERENCE.IMAGE)
-                imu = sensors_data.get_imu_data()
-                imu_data_list.append({
-                    'frame': extracted_frame_num,
-                    'timestamp': imu.timestamp.get_milliseconds(),
-                    'orientation': [imu.get_pose().get_orientation().get()],
-                    'angular_velocity': [imu.get_angular_velocity()],
-                    'linear_acceleration': [imu.get_linear_acceleration()],
-                })
-            
-            extracted_frame_num += 1
-            
-            # Progress callback with current frame info - avoid division by zero
-            if progress_callback and frames_to_process > 0:
-                progress = (extracted_frame_num / frames_to_process) * 100
-                progress = min(progress, 100.0)  # Cap at 100%
-                progress_callback(progress, extracted_frame_num, frames_to_process)
+                current_frame += 1
+            else:
+                break
         
-        # Save IMU data if collected
-        if imu_data_list:
-            np.save(str(self.output_dir / 'imu_data.npy'), imu_data_list)
+        # Save IMU data to CSV
+        if self.options['extract_imu'] and imu_data_list:
+            csv_path = os.path.join(self.folders['imu'], 'imu_data.csv')
+            with open(csv_path, 'w', newline='') as csvfile:
+                fieldnames = imu_data_list[0].keys()
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(imu_data_list)
+            
+            self.extracted_files.append({
+                'category': 'imu',
+                'file_type': 'csv',
+                'file_path': csv_path,
+                'filename': 'imu_data.csv',
+                'frame_number': None,
+                'file_size': os.path.getsize(csv_path)
+            })
         
-        return extracted_frame_num
+        return processed_count
     
-    def visualize_depth(self, depth_data):
-        """Create a colorized visualization of depth data"""
-        # Create a copy and handle invalid values
-        depth_viz = depth_data.copy()
-        
-        # Replace NaN and inf with 0
-        depth_viz[np.isnan(depth_viz)] = 0
-        depth_viz[np.isinf(depth_viz)] = 0
-        
-        # Normalize to 0-255 range
-        max_val = depth_viz.max()
-        if max_val > 0:
-            depth_normalized = cv2.normalize(depth_viz, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-        else:
-            depth_normalized = np.zeros_like(depth_viz, dtype=np.uint8)
-        
-        # Apply colormap - JET gives rainbow colors (blue=close, red=far)
+    def _colorize_depth(self, depth_data):
+        """Colorize depth map for visualization"""
+        depth_normalized = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
-        
         return depth_colored
     
-    def save_point_cloud(self, pc_data, filepath):
-        """Save point cloud as PLY file with correct RGB colors from ZED camera"""
-        # Extract XYZ coordinates (first 3 channels)
-        points = pc_data[:, :, :3].reshape(-1, 3)
+    def _visualize_normals(self, normals_data):
+        """Visualize normals map"""
+        normals_vis = ((normals_data[:, :, :3] + 1.0) * 127.5).astype(np.uint8)
+        return cv2.cvtColor(normals_vis, cv2.COLOR_RGB2BGR)
+    
+    def _save_point_cloud_ply(self, point_cloud_data, output_path):
+        """Save point cloud as PLY file"""
+        height, width, _ = point_cloud_data.shape
         
-        # Extract RGBA values (4th channel contains packed color)
-        rgba_packed = pc_data[:, :, 3].reshape(-1)
-        
-        # ZED SDK stores color as 32-bit unsigned int in ABGR format
-        # We need to unpack it correctly
-        rgba_as_uint32 = rgba_packed.view(np.uint32)
-        
-        # Unpack ABGR to RGB
-        # Format is: [A][B][G][R] in memory
-        r = ((rgba_as_uint32 >> 0) & 0xFF).astype(np.uint8)   # Red is in bits 0-7
-        g = ((rgba_as_uint32 >> 8) & 0xFF).astype(np.uint8)   # Green is in bits 8-15
-        b = ((rgba_as_uint32 >> 16) & 0xFF).astype(np.uint8)  # Blue is in bits 16-23
-        # a = ((rgba_as_uint32 >> 24) & 0xFF).astype(np.uint8)  # Alpha (we don't need this)
-        
-        # Stack into RGB array
-        colors_rgb = np.stack([r, g, b], axis=1)
-        
-        # Filter invalid points (NaN or Inf)
-        valid_mask = ~np.isnan(points).any(axis=1) & ~np.isinf(points).any(axis=1)
-        
-        # Also filter points that are too far or at origin
-        distance_mask = np.linalg.norm(points, axis=1) > 0.01  # Ignore points closer than 1cm
-        
-        # Combine masks
-        final_mask = valid_mask & distance_mask
-        
-        points = points[final_mask]
-        colors_rgb = colors_rgb[final_mask]
-        
-        # Write PLY file
-        with open(filepath, 'w') as f:
+        with open(output_path, 'w') as f:
+            # First pass: count valid points
+            valid_points = 0
+            for y in range(height):
+                for x in range(width):
+                    point = point_cloud_data[y, x]
+                    # Check if point coordinates are valid (not NaN or Inf)
+                    if (not np.isnan(point[0]) and not np.isinf(point[0]) and
+                        not np.isnan(point[1]) and not np.isinf(point[1]) and
+                        not np.isnan(point[2]) and not np.isinf(point[2]) and
+                        not np.isnan(point[3]) and not np.isinf(point[3])):
+                        valid_points += 1
+            
+            # Write PLY header
             f.write("ply\n")
             f.write("format ascii 1.0\n")
-            f.write(f"element vertex {len(points)}\n")
+            f.write(f"element vertex {valid_points}\n")
             f.write("property float x\n")
             f.write("property float y\n")
             f.write("property float z\n")
@@ -210,8 +305,35 @@ class SVO2Processor:
             f.write("property uchar blue\n")
             f.write("end_header\n")
             
-            for point, color in zip(points, colors_rgb):
-                f.write(f"{point[0]} {point[1]} {point[2]} {color[0]} {color[1]} {color[2]}\n")
+            # Second pass: write valid point data
+            for y in range(height):
+                for x in range(width):
+                    point = point_cloud_data[y, x]
+                    # Check if all components are valid
+                    if (not np.isnan(point[0]) and not np.isinf(point[0]) and
+                        not np.isnan(point[1]) and not np.isinf(point[1]) and
+                        not np.isnan(point[2]) and not np.isinf(point[2]) and
+                        not np.isnan(point[3]) and not np.isinf(point[3])):
+                        
+                        x_coord, y_coord, z_coord = point[:3]
+                        
+                        # RGBA is packed in the 4th component
+                        # Handle potential NaN in RGBA by defaulting to white
+                        try:
+                            rgba = int(point[3])
+                            r = (rgba >> 16) & 0xFF
+                            g = (rgba >> 8) & 0xFF
+                            b = rgba & 0xFF
+                        except (ValueError, OverflowError):
+                            # Default to white if RGBA is invalid
+                            r, g, b = 255, 255, 255
+                        
+                        f.write(f"{x_coord} {y_coord} {z_coord} {r} {g} {b}\n")
+    
+    def get_extracted_files(self):
+        """Get list of all extracted files"""
+        return self.extracted_files
     
     def close(self):
-        self.zed.close()
+        """Close the camera"""
+        self.camera.close()

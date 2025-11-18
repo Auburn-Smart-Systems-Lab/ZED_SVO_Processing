@@ -57,9 +57,12 @@
                                 <i class="bi bi-download"></i> Download
                             </a>
                             {% endif %}
+                            <a href="{% url 'rerun_job' job.id %}" class="btn btn-sm btn-outline-info" title="Rerun with different settings">
+                                <i class="bi bi-arrow-repeat"></i>
+                            </a>
                             <button class="btn btn-sm btn-outline-danger" 
                                     onclick="confirmDelete({{ job.id }}, {{ job.svo2_files.count }})">
-                                <i class="bi bi-trash"></i> Delete
+                                <i class="bi bi-trash"></i>
                             </button>
                         </td>
                     </tr>

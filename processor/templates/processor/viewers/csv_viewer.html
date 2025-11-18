@@ -1,0 +1,69 @@
+{% extends 'processor/base.html' %}
+
+{% block title %}View CSV - {{ file.filename }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-table"></i> {{ file.filename }}</h2>
+            <div>
+                <a href="{% url 'browse_files' file.job.id %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left"></i> Back to Browse
+                </a>
+                <a href="{% url 'serve_extracted_file' file.id %}" class="btn btn-success" download>
+                    <i class="bi bi-download"></i> Download CSV
+                </a>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-compass"></i> IMU Data ({{ file_data|length }} records)</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                    <table class="table table-striped table-sm">
+                        <thead class="sticky-top bg-white">
+                            <tr>
+                                {% for key in file_data.0.keys %}
+                                <th>{{ key }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in file_data %}
+                            <tr>
+                                {% for value in row.values %}
+                                <td>{{ value }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> File Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Category:</strong> {{ file.get_category_display }}</p>
+                        <p><strong>Filename:</strong> {{ file.filename }}</p>
+                        <p><strong>File Size:</strong> {{ file.file_size|filesizeformat }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Total Records:</strong> {{ file_data|length }}</p>
+                        <p><strong>Job ID:</strong> #{{ file.job.id }}</p>
+                        <p><strong>Source File:</strong> {{ file.svo2_file.filename }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

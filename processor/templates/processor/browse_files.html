@@ -1,0 +1,79 @@
+{% extends 'processor/base.html' %}
+
+{% block title %}Browse Files - Job #{{ job.id }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-folder2-open"></i> Browse Extracted Files - Job #{{ job.id }}</h2>
+            <a href="{% url 'job_status' job.id %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Job Status
+            </a>
+        </div>
+
+        {% if not categories %}
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i> No extracted files found for this job.
+        </div>
+        {% else %}
+        <div class="row">
+            {% for category_key, category_data in categories.items %}
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">
+                            <i class="bi bi-{% if 'rgb' in category_key %}camera-video{% elif category_key == 'depth' %}bar-chart{% elif category_key == 'point_cloud' %}grid-3x3{% elif category_key == 'confidence' %}clipboard-data{% elif category_key == 'normals' %}bezier2{% elif category_key == 'imu' %}compass{% endif %}"></i>
+                            {{ category_data.label }}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            <strong>{{ category_data.count }}</strong> file(s) extracted
+                        </p>
+                        
+                        {% if category_key == 'imu' %}
+                        <!-- IMU CSV - Direct view -->
+                        <a href="{% url 'view_file' category_data.files.first.id %}" class="btn btn-primary w-100 mb-2">
+                            <i class="bi bi-eye"></i> View IMU Data
+                        </a>
+                        {% else %}
+                        <!-- Gallery view for images and other files -->
+                        <a href="{% url 'gallery_view' job.id category_key %}" class="btn btn-primary w-100 mb-2">
+                            <i class="bi bi-grid-3x3"></i> View Gallery
+                        </a>
+                        {% endif %}
+                        
+                        <!-- Sample preview (first 3 files) -->
+                        <div class="mt-3">
+                            <small class="text-muted">Sample files:</small>
+                            <ul class="list-unstyled mt-2" style="font-size: 0.85rem;">
+                                {% for file in category_data.files|slice:":3" %}
+                                <li class="text-truncate">
+                                    <i class="bi bi-file-earmark"></i> {{ file.filename }}
+                                </li>
+                                {% endfor %}
+                                {% if category_data.count > 3 %}
+                                <li class="text-muted">... and {{ category_data.count|add:"-3" }} more</li>
+                                {% endif %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm mt-4">
+            <div class="card-body">
+                <h5><i class="bi bi-info-circle"></i> Download Options</h5>
+                <p>Download all extracted files as a ZIP archive:</p>
+                <a href="{% url 'download_results' job.id %}" class="btn btn-success">
+                    <i class="bi bi-download"></i> Download All Files (ZIP)
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

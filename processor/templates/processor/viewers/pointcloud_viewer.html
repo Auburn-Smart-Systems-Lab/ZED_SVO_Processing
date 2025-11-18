@@ -1,0 +1,132 @@
+{% extends 'processor/base.html' %}
+
+{% block title %}View Point Cloud - {{ file.filename }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-box"></i> {{ file.filename }}</h2>
+            <div>
+                <a href="{% url 'gallery_view' file.job.id file.category %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left"></i> Back to Gallery
+                </a>
+                <a href="{% url 'serve_extracted_file' file.id %}" class="btn btn-success" download>
+                    <i class="bi bi-download"></i> Download PLY
+                </a>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div id="viewer" style="width: 100%; height: 600px; background: #1a1a1a;"></div>
+                <div class="text-center mt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-mouse"></i> Left click + drag to rotate | 
+                        <i class="bi bi-mouse2"></i> Right click + drag to pan | 
+                        <i class="bi bi-mouse3"></i> Scroll to zoom
+                    </small>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> File Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Category:</strong> {{ file.get_category_display }}</p>
+                        <p><strong>Filename:</strong> {{ file.filename }}</p>
+                        <p><strong>File Size:</strong> {{ file.file_size|filesizeformat }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        {% if file.frame_number is not None %}
+                        <p><strong>Frame Number:</strong> {{ file.frame_number }}</p>
+                        {% endif %}
+                        <p><strong>Job ID:</strong> #{{ file.job.id }}</p>
+                        <p><strong>Source File:</strong> {{ file.svo2_file.filename }}</p>
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle"></i> Download the PLY file to view in external software like CloudCompare or MeshLab for advanced visualization.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/examples/js/loaders/PLYLoader.js"></script>
+<script>
+// Basic Three.js point cloud viewer
+const container = document.getElementById('viewer');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+camera.position.z = 5;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// Add lights
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+directionalLight.position.set(0, 1, 0);
+scene.add(directionalLight);
+
+// Load PLY
+const loader = new THREE.PLYLoader();
+loader.load('{% url 'serve_extracted_file' file.id %}', function (geometry) {
+    geometry.computeVertexNormals();
+    
+    const material = new THREE.PointsMaterial({ 
+        size: 0.01, 
+        vertexColors: true 
+    });
+    
+    const mesh = new THREE.Points(geometry, material);
+    
+    // Center the model
+    geometry.computeBoundingBox();
+    const center = new THREE.Vector3();
+    geometry.boundingBox.getCenter(center);
+    mesh.position.sub(center);
+    
+    scene.add(mesh);
+    
+    // Adjust camera
+    const size = geometry.boundingBox.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    camera.position.z = maxDim * 2;
+}, undefined, function (error) {
+    console.error('Error loading point cloud:', error);
+    container.innerHTML = '<div class="alert alert-danger m-3">Failed to load point cloud. Please download the file to view in external software.</div>';
+});
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+}
+animate();
+
+// Handle window resize
+window.addEventListener('resize', function() {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+});
+</script>
+{% endblock %}

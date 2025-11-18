@@ -10,10 +10,11 @@ urlpatterns = [
     path('job/<int:job_id>/progress/', views.job_progress, name='job_progress'),
     path('job/<int:job_id>/download/', views.download_results, name='download_results'),
     path('job/<int:job_id>/delete/', views.delete_job, name='delete_job'),
+    path('job/<int:job_id>/rerun/', views.rerun_job, name='rerun_job'),
     
-    # Preview endpoints
-    path('preview/<int:file_id>/info/', views.preview_svo2_info, name='preview_svo2_info'),
-    path('preview/<int:file_id>/frame/', views.preview_svo2_frame, name='preview_svo2_frame'),
-    path('preview/<int:file_id>/imu/', views.preview_svo2_imu, name='preview_svo2_imu'),
-    path('preview/<int:file_id>/thumbnail/', views.preview_svo2_thumbnail, name='preview_svo2_thumbnail'),
+    # File browsing
+    path('job/<int:job_id>/browse/', views.browse_files, name='browse_files'),
+    path('job/<int:job_id>/gallery/<str:category>/', views.gallery_view, name='gallery_view'),
+    path('file/<int:file_id>/view/', views.view_file, name='view_file'),
+    path('file/<int:file_id>/serve/', views.serve_extracted_file, name='serve_extracted_file'),
 ]
